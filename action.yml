@@ -89,8 +89,9 @@ runs:
       id: gather
       run: |
         GATHER_ARGS="--provider ${{ inputs.provider }} --resource-type ${{ inputs.resource-type }} --config '${{ inputs.provider-config }}'"
-        kxn gather $GATHER_ARGS > /tmp/kxn-gathered.json 2>&1 || {
+        eval kxn gather $GATHER_ARGS > /tmp/kxn-gathered.json || {
           echo "::warning::Gather failed, check provider configuration"
+          cat /tmp/kxn-gathered.json 2>/dev/null
           exit 1
         }
         echo "gathered=true" >> "$GITHUB_OUTPUT"
@@ -144,7 +145,19 @@ runs:
           SCAN_ARGS="$SCAN_ARGS --min-level ${{ inputs.min-level }}"
         fi
 
-        # Run scan (capture exit code)
+        # Also run a JSON scan to extract outputs
+        set +e
+        JSON_SCAN_ARGS=$(echo "$SCAN_ARGS" | sed 's/--output [a-z]*/--output json/' | sed 's/--sarif-file [^ ]*//')
+        JSON_OUT=$(eval kxn scan $JSON_SCAN_ARGS 2>/dev/null)
+        set -e
+
+        if [ -n "$JSON_OUT" ]; then
+          echo "total=$(echo "$JSON_OUT" | jq -r '.total_rules // 0')" >> "$GITHUB_OUTPUT"
+          echo "passed=$(echo "$JSON_OUT" | jq -r '.passed // 0')" >> "$GITHUB_OUTPUT"
+          echo "failed=$(echo "$JSON_OUT" | jq -r '.failed // 0')" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Run scan with requested output format
         set +e
         eval kxn scan $SCAN_ARGS 2>&1
         EXIT_CODE=$?

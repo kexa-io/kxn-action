@@ -1,0 +1,46 @@
+name: Test kxn-action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-http-scan:
+    name: HTTP security scan on kexa.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: scan
+        with:
+          rules: test/rules
+          provider: http
+          provider-config: '{"URL":"https://kexa.io"}'
+          output: sarif
+          sarif-file: kxn-results.sarif
+          upload-sarif: 'false'
+          fail-on-violations: 'false'
+
+      - name: Show results
+        if: always()
+        run: |
+          echo "Total: ${{ steps.scan.outputs.total }}"
+          echo "Passed: ${{ steps.scan.outputs.passed }}"
+          echo "Failed: ${{ steps.scan.outputs.failed }}"
+          if [ -f kxn-results.sarif ]; then
+            echo "--- SARIF output ---"
+            cat kxn-results.sarif | head -100
+          fi
+
+      - name: Verify scan ran
+        if: always()
+        run: |
+          TOTAL="${{ steps.scan.outputs.total }}"
+          if [ -z "$TOTAL" ] || [ "$TOTAL" = "0" ]; then
+            echo "::error::Scan did not evaluate any rules"
+            exit 1
+          fi
+          echo "Scan evaluated $TOTAL rules: ${{ steps.scan.outputs.passed }} passed, ${{ steps.scan.outputs.failed }} failed"
