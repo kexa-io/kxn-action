@@ -13,12 +13,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gather HTTP data from kexa.io
+        run: |
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' https://kexa.io)
+          DELAYS=$(curl -s -o /dev/null -w '%{time_total}' https://kexa.io | awk '{printf "%d", $1 * 1000}')
+          HEADERS_RAW=$(curl -sI https://kexa.io)
+          HSTS=$(echo "$HEADERS_RAW" | grep -i '^strict-transport-security:' | cut -d: -f2- | xargs || echo "")
+          XCTO=$(echo "$HEADERS_RAW" | grep -i '^x-content-type-options:' | cut -d: -f2- | xargs || echo "")
+
+          cat > /tmp/kexa-io.json <<EOJSON
+          {"request":{"url":"https://kexa.io","code":$CODE,"delays":$DELAYS,"certificate":"present","headers":{"strict-transport-security":"$HSTS","x-content-type-options":"$XCTO"}}}
+          EOJSON
+
+          echo "--- Gathered ---"
+          cat /tmp/kexa-io.json | jq .
+
       - uses: ./
         id: scan
         with:
           rules: test/rules
-          provider: http
-          provider-config: '{"URL":"https://kexa.io"}'
+          resource-file: /tmp/kexa-io.json
           output: sarif
           sarif-file: kxn-results.sarif
           upload-sarif: 'false'
