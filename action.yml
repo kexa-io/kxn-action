@@ -63,10 +63,7 @@ inputs:
     description: 'Fail the action if violations are found (default: true)'
     required: false
     default: 'true'
-  token:
-    description: 'GitHub token with access to kexa-io/kxn releases (required for private repo)'
-    required: false
-    default: ${{ github.token }}
+
 
 outputs:
   total:
@@ -86,7 +83,6 @@ runs:
       run: ${{ github.action_path }}/install.sh
       env:
         KXN_VERSION: ${{ inputs.version }}
-        GH_TOKEN: ${{ inputs.token }}
 
     - name: Gather resources
       if: inputs.provider != ''

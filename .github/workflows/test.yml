@@ -23,7 +23,6 @@ jobs:
           sarif-file: kxn-results.sarif
           upload-sarif: 'false'
           fail-on-violations: 'false'
-          token: ${{ secrets.KXN_RELEASE_TOKEN }}
 
       - name: Show results
         if: always()
