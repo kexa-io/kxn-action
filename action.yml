@@ -88,9 +88,10 @@ runs:
       if: inputs.provider != ''
       shell: bash
       id: gather
+      env:
+        KXN_PROVIDER_CONFIG: ${{ inputs.provider-config }}
       run: |
-        GATHER_ARGS="--provider ${{ inputs.provider }} --resource-type ${{ inputs.resource-type }} --config '${{ inputs.provider-config }}'"
-        eval kxn gather $GATHER_ARGS > /tmp/kxn-gathered.json || {
+        kxn gather --provider "${{ inputs.provider }}" --resource-type "${{ inputs.resource-type }}" --config "$KXN_PROVIDER_CONFIG" > /tmp/kxn-gathered.json || {
           echo "::warning::Gather failed, check provider configuration"
           cat /tmp/kxn-gathered.json 2>/dev/null
           exit 1
@@ -100,56 +101,52 @@ runs:
     - name: Run scan
       shell: bash
       id: scan
+      env:
+        KXN_RESOURCE_INLINE: ${{ inputs.resource }}
+        KXN_RESOURCE_FILE: ${{ inputs.resource-file }}
       run: |
-        # Build scan args
-        SCAN_ARGS=""
+        # Build scan command args
+        SCAN_ARGS=()
 
         # Rules source
         if [ -n "${{ inputs.config }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --config ${{ inputs.config }}"
+          SCAN_ARGS+=(--config "${{ inputs.config }}")
         else
-          SCAN_ARGS="$SCAN_ARGS --rules ${{ inputs.rules }}"
+          SCAN_ARGS+=(--rules "${{ inputs.rules }}")
         fi
 
         # Resource data
-        if [ -n "${{ inputs.resource }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --resource '${{ inputs.resource }}'"
-        elif [ -n "${{ inputs.resource-file }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --resource \"$(cat ${{ inputs.resource-file }})\""
+        if [ -n "$KXN_RESOURCE_INLINE" ]; then
+          SCAN_ARGS+=(--resource "$KXN_RESOURCE_INLINE")
+        elif [ -n "$KXN_RESOURCE_FILE" ]; then
+          SCAN_ARGS+=(--resource "$(cat "$KXN_RESOURCE_FILE")")
         elif [ -f /tmp/kxn-gathered.json ]; then
-          SCAN_ARGS="$SCAN_ARGS --resource \"$(cat /tmp/kxn-gathered.json)\""
+          SCAN_ARGS+=(--resource "$(cat /tmp/kxn-gathered.json)")
         else
           echo "::error::No resource data provided. Use resource, resource-file, or provider inputs."
           exit 1
         fi
 
-        # Output format
-        SCAN_ARGS="$SCAN_ARGS --output ${{ inputs.output }}"
-        if [ "${{ inputs.output }}" = "sarif" ]; then
-          SCAN_ARGS="$SCAN_ARGS --sarif-file ${{ inputs.sarif-file }}"
-        fi
-
         # Filters
         if [ -n "${{ inputs.include }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --include '${{ inputs.include }}'"
+          SCAN_ARGS+=(--include "${{ inputs.include }}")
         fi
         if [ -n "${{ inputs.exclude }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --exclude '${{ inputs.exclude }}'"
+          SCAN_ARGS+=(--exclude "${{ inputs.exclude }}")
         fi
         if [ -n "${{ inputs.tags }}" ]; then
           IFS=',' read -ra TAGS <<< "${{ inputs.tags }}"
           for tag in "${TAGS[@]}"; do
-            SCAN_ARGS="$SCAN_ARGS --tag $tag"
+            SCAN_ARGS+=(--tag "$tag")
           done
         fi
         if [ -n "${{ inputs.min-level }}" ]; then
-          SCAN_ARGS="$SCAN_ARGS --min-level ${{ inputs.min-level }}"
+          SCAN_ARGS+=(--min-level "${{ inputs.min-level }}")
         fi
 
-        # Also run a JSON scan to extract outputs
+        # Run JSON scan first to extract outputs
         set +e
-        JSON_SCAN_ARGS=$(echo "$SCAN_ARGS" | sed 's/--output [a-z]*/--output json/' | sed 's/--sarif-file [^ ]*//')
-        JSON_OUT=$(eval kxn scan $JSON_SCAN_ARGS 2>/dev/null)
+        JSON_OUT=$(kxn scan "${SCAN_ARGS[@]}" --output json 2>/dev/null)
         set -e
 
         if [ -n "$JSON_OUT" ]; then
@@ -159,8 +156,13 @@ runs:
         fi
 
         # Run scan with requested output format
+        SCAN_ARGS+=(--output "${{ inputs.output }}")
+        if [ "${{ inputs.output }}" = "sarif" ]; then
+          SCAN_ARGS+=(--sarif-file "${{ inputs.sarif-file }}")
+        fi
+
         set +e
-        eval kxn scan $SCAN_ARGS 2>&1
+        kxn scan "${SCAN_ARGS[@]}" 2>&1
         EXIT_CODE=$?
         set -e
 
