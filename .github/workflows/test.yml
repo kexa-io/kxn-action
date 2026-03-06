@@ -29,9 +29,15 @@ jobs:
           echo "Total: ${{ steps.scan.outputs.total }}"
           echo "Passed: ${{ steps.scan.outputs.passed }}"
           echo "Failed: ${{ steps.scan.outputs.failed }}"
+          if [ -f /tmp/kxn-json-out.json ]; then
+            echo "--- JSON output ---"
+            cat /tmp/kxn-json-out.json
+          else
+            echo "No JSON output file found"
+          fi
           if [ -f kxn-results.sarif ]; then
             echo "--- SARIF output ---"
-            cat kxn-results.sarif | head -100
+            cat kxn-results.sarif | head -50
           fi
 
       - name: Verify scan ran

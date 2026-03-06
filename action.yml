@@ -144,27 +144,35 @@ runs:
           SCAN_ARGS+=(--min-level "${{ inputs.min-level }}")
         fi
 
-        # Run JSON scan first to extract outputs
-        set +e
-        JSON_OUT=$(kxn scan "${SCAN_ARGS[@]}" --output json 2>/dev/null)
-        set -e
+        # Save base args (without output format) for JSON extraction
+        BASE_ARGS=("${SCAN_ARGS[@]}")
 
-        if [ -n "$JSON_OUT" ]; then
-          echo "total=$(echo "$JSON_OUT" | jq -r '.total_rules // 0')" >> "$GITHUB_OUTPUT"
-          echo "passed=$(echo "$JSON_OUT" | jq -r '.passed // 0')" >> "$GITHUB_OUTPUT"
-          echo "failed=$(echo "$JSON_OUT" | jq -r '.failed // 0')" >> "$GITHUB_OUTPUT"
-        fi
-
-        # Run scan with requested output format
+        # Add output format
         SCAN_ARGS+=(--output "${{ inputs.output }}")
         if [ "${{ inputs.output }}" = "sarif" ]; then
           SCAN_ARGS+=(--sarif-file "${{ inputs.sarif-file }}")
         fi
 
+        # Run scan
         set +e
         kxn scan "${SCAN_ARGS[@]}" 2>&1
         EXIT_CODE=$?
         set -e
+
+        # Extract counts via a JSON scan (write to file to avoid $() capture issues)
+        set +e
+        kxn scan "${BASE_ARGS[@]}" --output json > /tmp/kxn-json-out.json 2>/dev/null
+        set -e
+
+        if [ -s /tmp/kxn-json-out.json ]; then
+          echo "total=$(jq -r '.total_rules // 0' /tmp/kxn-json-out.json)" >> "$GITHUB_OUTPUT"
+          echo "passed=$(jq -r '.passed // 0' /tmp/kxn-json-out.json)" >> "$GITHUB_OUTPUT"
+          echo "failed=$(jq -r '.failed // 0' /tmp/kxn-json-out.json)" >> "$GITHUB_OUTPUT"
+        else
+          echo "total=0" >> "$GITHUB_OUTPUT"
+          echo "passed=0" >> "$GITHUB_OUTPUT"
+          echo "failed=0" >> "$GITHUB_OUTPUT"
+        fi
 
         if [ $EXIT_CODE -ne 0 ] && [ "${{ inputs.fail-on-violations }}" = "false" ]; then
           echo "::warning::kxn scan found violations (exit code $EXIT_CODE)"
