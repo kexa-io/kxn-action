@@ -154,16 +154,11 @@ runs:
           SCAN_ARGS+=(--sarif-file "${{ inputs.sarif-file }}")
         fi
 
-        # Run scan
-        set +e
-        kxn scan "${SCAN_ARGS[@]}" 2>&1
-        EXIT_CODE=$?
-        set -e
+        # Run scan (|| true to prevent bash -e from aborting on violations)
+        kxn scan "${SCAN_ARGS[@]}" 2>&1 && EXIT_CODE=0 || EXIT_CODE=$?
 
-        # Extract counts via a JSON scan (write to file to avoid $() capture issues)
-        set +e
-        kxn scan "${BASE_ARGS[@]}" --output json > /tmp/kxn-json-out.json 2>/dev/null
-        set -e
+        # Extract counts via a JSON scan (write to file)
+        kxn scan "${BASE_ARGS[@]}" --output json > /tmp/kxn-json-out.json 2>/dev/null || true
 
         if [ -s /tmp/kxn-json-out.json ]; then
           echo "total=$(jq -r '.total_rules // 0' /tmp/kxn-json-out.json)" >> "$GITHUB_OUTPUT"
