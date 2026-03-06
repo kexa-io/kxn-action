@@ -3,6 +3,12 @@ set -euo pipefail
 
 VERSION="${KXN_VERSION:-latest}"
 
+# Use GITHUB_TOKEN if available (avoids API rate limits)
+AUTH_HEADER=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: token $GITHUB_TOKEN"
+fi
+
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -23,10 +29,11 @@ TARGET="${TARGET_ARCH}-${TARGET_OS}"
 
 # Resolve latest version from homebrew-tap releases (public)
 if [ "$VERSION" = "latest" ]; then
-  VERSION=$(curl -sSL "https://api.github.com/repos/kexa-io/homebrew-tap/releases/latest" \
-    | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+  RELEASE_JSON=$(curl -sSL ${AUTH_HEADER:+-H "$AUTH_HEADER"} "https://api.github.com/repos/kexa-io/homebrew-tap/releases/latest" || true)
+  VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
   if [ -z "$VERSION" ]; then
-    echo "::error::Failed to resolve latest kxn version"
+    echo "::error::Failed to resolve latest kxn version. API response:"
+    echo "$RELEASE_JSON" | head -5
     exit 1
   fi
 fi
