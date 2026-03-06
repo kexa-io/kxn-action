@@ -1,0 +1,166 @@
+name: 'kxn Compliance Scan'
+description: 'Scan infrastructure against compliance rules (CIS, PCI-DSS, ISO27001) with kxn'
+author: 'kexa-io'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'kxn version to use (default: latest)'
+    required: false
+    default: 'latest'
+  rules:
+    description: 'Path to rules directory or TOML file'
+    required: false
+    default: './rules'
+  resource:
+    description: 'JSON resource data to scan (mutually exclusive with resource-file)'
+    required: false
+  resource-file:
+    description: 'Path to JSON file containing resource data'
+    required: false
+  config:
+    description: 'Path to kxn.toml config file'
+    required: false
+  provider:
+    description: 'Provider name for gathering (e.g. ssh, kubernetes, bpg/proxmox)'
+    required: false
+  provider-config:
+    description: 'Provider config JSON for gathering'
+    required: false
+    default: '{}'
+  resource-type:
+    description: 'Resource type to gather (default: all)'
+    required: false
+    default: 'all'
+  output:
+    description: 'Output format: text, json, sarif (default: sarif)'
+    required: false
+    default: 'sarif'
+  sarif-file:
+    description: 'Path for SARIF output file'
+    required: false
+    default: 'kxn-results.sarif'
+  upload-sarif:
+    description: 'Upload SARIF to GitHub Security tab (default: true)'
+    required: false
+    default: 'true'
+  include:
+    description: 'Include rules matching glob pattern'
+    required: false
+  exclude:
+    description: 'Exclude rules matching glob pattern'
+    required: false
+  tags:
+    description: 'Filter rules by tags (comma-separated)'
+    required: false
+  min-level:
+    description: 'Minimum severity level (0=info, 1=warning, 2=error, 3=fatal)'
+    required: false
+  fail-on-violations:
+    description: 'Fail the action if violations are found (default: true)'
+    required: false
+    default: 'true'
+
+outputs:
+  total:
+    description: 'Total rules evaluated'
+  passed:
+    description: 'Number of rules passed'
+  failed:
+    description: 'Number of rules failed'
+  sarif-file:
+    description: 'Path to SARIF output file'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install kxn
+      shell: bash
+      run: ${{ github.action_path }}/install.sh
+      env:
+        KXN_VERSION: ${{ inputs.version }}
+
+    - name: Gather resources
+      if: inputs.provider != ''
+      shell: bash
+      id: gather
+      run: |
+        GATHER_ARGS="--provider ${{ inputs.provider }} --resource-type ${{ inputs.resource-type }} --config '${{ inputs.provider-config }}'"
+        kxn gather $GATHER_ARGS > /tmp/kxn-gathered.json 2>&1 || {
+          echo "::warning::Gather failed, check provider configuration"
+          exit 1
+        }
+        echo "gathered=true" >> "$GITHUB_OUTPUT"
+
+    - name: Run scan
+      shell: bash
+      id: scan
+      run: |
+        # Build scan args
+        SCAN_ARGS=""
+
+        # Rules source
+        if [ -n "${{ inputs.config }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --config ${{ inputs.config }}"
+        else
+          SCAN_ARGS="$SCAN_ARGS --rules ${{ inputs.rules }}"
+        fi
+
+        # Resource data
+        if [ -n "${{ inputs.resource }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --resource '${{ inputs.resource }}'"
+        elif [ -n "${{ inputs.resource-file }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --resource \"$(cat ${{ inputs.resource-file }})\""
+        elif [ -f /tmp/kxn-gathered.json ]; then
+          SCAN_ARGS="$SCAN_ARGS --resource \"$(cat /tmp/kxn-gathered.json)\""
+        else
+          echo "::error::No resource data provided. Use resource, resource-file, or provider inputs."
+          exit 1
+        fi
+
+        # Output format
+        SCAN_ARGS="$SCAN_ARGS --output ${{ inputs.output }}"
+        if [ "${{ inputs.output }}" = "sarif" ]; then
+          SCAN_ARGS="$SCAN_ARGS --sarif-file ${{ inputs.sarif-file }}"
+        fi
+
+        # Filters
+        if [ -n "${{ inputs.include }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --include '${{ inputs.include }}'"
+        fi
+        if [ -n "${{ inputs.exclude }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --exclude '${{ inputs.exclude }}'"
+        fi
+        if [ -n "${{ inputs.tags }}" ]; then
+          IFS=',' read -ra TAGS <<< "${{ inputs.tags }}"
+          for tag in "${TAGS[@]}"; do
+            SCAN_ARGS="$SCAN_ARGS --tag $tag"
+          done
+        fi
+        if [ -n "${{ inputs.min-level }}" ]; then
+          SCAN_ARGS="$SCAN_ARGS --min-level ${{ inputs.min-level }}"
+        fi
+
+        # Run scan (capture exit code)
+        set +e
+        eval kxn scan $SCAN_ARGS 2>&1
+        EXIT_CODE=$?
+        set -e
+
+        if [ $EXIT_CODE -ne 0 ] && [ "${{ inputs.fail-on-violations }}" = "false" ]; then
+          echo "::warning::kxn scan found violations (exit code $EXIT_CODE)"
+          EXIT_CODE=0
+        fi
+
+        echo "sarif-file=${{ inputs.sarif-file }}" >> "$GITHUB_OUTPUT"
+        exit $EXIT_CODE
+
+    - name: Upload SARIF
+      if: inputs.upload-sarif == 'true' && inputs.output == 'sarif' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        wait-for-processing: false
