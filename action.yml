@@ -155,10 +155,14 @@ runs:
         fi
 
         # Run scan (|| true to prevent bash -e from aborting on violations)
+        echo "DEBUG: Running kxn scan with args: ${SCAN_ARGS[*]}"
         kxn scan "${SCAN_ARGS[@]}" 2>&1 && EXIT_CODE=0 || EXIT_CODE=$?
+        echo "DEBUG: Scan exit code: $EXIT_CODE"
 
         # Extract counts via a JSON scan (write to file)
+        echo "DEBUG: Running JSON scan for output extraction"
         kxn scan "${BASE_ARGS[@]}" --output json > /tmp/kxn-json-out.json 2>/dev/null || true
+        echo "DEBUG: JSON file size: $(wc -c < /tmp/kxn-json-out.json 2>/dev/null || echo 'missing')"
 
         if [ -s /tmp/kxn-json-out.json ]; then
           echo "total=$(jq -r '.total_rules // 0' /tmp/kxn-json-out.json)" >> "$GITHUB_OUTPUT"
